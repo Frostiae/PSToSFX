@@ -45,6 +45,7 @@ Copy the SFXExport.cs script into the Assets/Editor folder. That's it.
 - Don't use the rate properties in the emission module, use one burst instead, and set the burst count to 1.
 - Don't use any of the modules that are not supported (duh), as they won't allow you to export.
 - Don't use modes that are not either constant or curve, for the modules that support those decisions.
+- Don't forget to check the console, it's very helpful.
 
 ## Troubleshooting
 If something isn't working as expected, the first thing you should do is **check the logs**. Check your console and enable warnings too! If you do find a bug, feel free to create an issue or message me on discord (Frostiae#2809).
