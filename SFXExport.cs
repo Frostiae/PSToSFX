@@ -45,20 +45,22 @@ public class SFXExport : MonoBehaviour
 
         // TODO: Currently only supporting bill (1)
         file.Write(1);                                  // Type (Bill/Particle)
-        SaveBill(prefab, file);
+        if (!SaveBill(prefab, file))
+            return;
 
         // Save all the children as well
         for (int i = 0; i < numParts; i++)
         {
             file.Write(1);
-            SaveBill(prefab.transform.GetChild(i).gameObject, file);
+            if (!SaveBill(prefab.transform.GetChild(i).gameObject, file))
+                return;
         }
     }
 
     /// <summary>
     /// Save a CSFXPartBill object.
     /// </summary>
-    static void SaveBill(GameObject part, BinaryWriter file)
+    static bool SaveBill(GameObject part, BinaryWriter file)
     {
         List<sfxKeyframe> keyframes = new List<sfxKeyframe>();
 
@@ -71,16 +73,16 @@ public class SFXExport : MonoBehaviour
 
         if (ps.main.startSpeed.constant > 0)
         {
-            Debug.LogError("Start speed in the main module is not supported. Use Velocity over lifetime instead.");
-            return;
+            Debug.LogError("Start speed in the main module is not supported. Set it to 0 and Use Velocity over lifetime instead.");
+            return false;
         }
 
         if (emission.rateOverTime.constant > 0 || 
             emission.rateOverDistance.constant > 0 ||
             emission.burstCount < 1)
         {
-            Debug.LogError("Only bursts are supported in the emission module. Do not use rate over time or distance.");
-            return;
+            Debug.LogError("Only bursts are supported in the emission module. Set the burst count to 1 and do not use rate over time or distance.");
+            return false;
         }
 
         if (!CheckModules(ps))
@@ -164,6 +166,7 @@ public class SFXExport : MonoBehaviour
         file.Write(numKeys);                            // # of keyframes
 
         WriteKeyframes(file, keyframes);
+        return true;
     }
 
 
