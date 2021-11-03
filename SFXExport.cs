@@ -29,13 +29,17 @@ public class SFXExport : MonoBehaviour
         BinaryWriter file = new BinaryWriter(File.Open("Assets/Exports/" + fileName + ".sfx", FileMode.Create));
 
         file.Flush();
-        SaveData(file);
-        file.Close();
+        if (!SaveData(file))
+        {
+            file.Close();
+            return;
+        }
 
+        file.Close();
         Debug.Log("Particle done exporting to SFX.");
     }
 
-    static void SaveData(BinaryWriter file)
+    static bool SaveData(BinaryWriter file)
     {
         string version = "SFX0.3  ";
         file.Write(version.ToCharArray());
@@ -46,15 +50,17 @@ public class SFXExport : MonoBehaviour
         // TODO: Currently only supporting bill (1)
         file.Write(1);                                  // Type (Bill/Particle)
         if (!SaveBill(prefab, file))
-            return;
+            return false;
 
         // Save all the children as well
         for (int i = 0; i < numParts; i++)
         {
             file.Write(1);
             if (!SaveBill(prefab.transform.GetChild(i).gameObject, file))
-                return;
+                return false;
         }
+
+        return true;
     }
 
     /// <summary>
@@ -152,15 +158,15 @@ public class SFXExport : MonoBehaviour
         }
 
         // INDIVIDUAL MODULES
-        SaveSizes(ps, file, keyframes);
-        SaveRotations(ps, file, keyframes);
-        SaveNoise(ps, file, keyframes);
-        SaveVelocity(ps, file, keyframes);
-        SaveTransformPosition(ps, file, keyframes);
-        SaveOrbitalVelocity(ps, file, keyframes);
+        if (!SaveSizes(ps, file, keyframes)) return false;
+        if (!SaveRotations(ps, file, keyframes)) return false;
+        if (!SaveNoise(ps, file, keyframes)) return false;
+        if (!SaveVelocity(ps, file, keyframes)) return false;
+        if (!SaveTransformPosition(ps, file, keyframes)) return false;
+        if (!SaveOrbitalVelocity(ps, file, keyframes)) return false;
 
         // Colors need to be done at the end because the alpha needs to be applied to whatever keyframes exist by now
-        SaveColors(ps, file, keyframes);
+        if (!SaveColors(ps, file, keyframes)) return false;
         
         int numKeys = emission.enabled ? keyframes.Count() : 0;
         file.Write(numKeys);                            // # of keyframes
@@ -196,10 +202,10 @@ public class SFXExport : MonoBehaviour
     /// Convert the Unity colors over lifetime modile to SFX. Only the alpha value is used, since flyff
     /// SFX does not support color editing.
     /// </summary>
-    static void SaveColors(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveColors(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var colors = ps.colorOverLifetime;
-        if (!colors.enabled) return;
+        if (!colors.enabled) return true;
 
         // We need this loop because if the color curve is just 2 keyframes -- start and end -- we need
         // the alpha to still be applied to all the existing keyframes in between.
@@ -227,12 +233,14 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
     /// <summary>
     /// Convert the Unity size over lifetime module to SFX (scale).
     /// </summary>
-    static void SaveSizes(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveSizes(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var sizes = ps.sizeOverLifetime;
 
@@ -251,7 +259,7 @@ public class SFXExport : MonoBehaviour
                 else
                     keyframes.Add(newKeyframe);
             }
-            return;
+            return true;
         }
 
         for (int i = 0; i <= curveSubdivisions; i++)
@@ -282,15 +290,17 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
     /// <summary>
     /// Convert the Unity rotations over lifetime module to SFX (rotations).
     /// </summary>
-    static void SaveRotations(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveRotations(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var rotations = ps.rotationOverLifetime;
-        if (!rotations.enabled) return;
+        if (!rotations.enabled) return true;
 
         for (int i = 0; i <= curveSubdivisions; i++)
         {
@@ -319,7 +329,7 @@ public class SFXExport : MonoBehaviour
                 else
                 {
                     Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the rotation over lifetime module.");
-                    return;
+                    return false;
                 }
             }
             else  // Angular velocity
@@ -331,7 +341,7 @@ public class SFXExport : MonoBehaviour
                 else
                 {
                     Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the rotation over lifetime module (Angular velocity).");
-                    return;
+                    return false;
                 }
             }
 
@@ -345,15 +355,17 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
     /// <summary>
     /// Simulate the same effect the noise module gives through individual keyframe positions.
     /// </summary>
-    static void SaveNoise(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveNoise(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var noise = ps.noise;
-        if (!noise.enabled) return;
+        if (!noise.enabled) return true;
 
         // I have to basically make my own noise-to-position system here, since there
         // is no way to get any data from the noise module in unity.
@@ -378,15 +390,17 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
     /// <summary>
     /// Convert the Unity velocity over lifetime orbital velocity properties to SFX (posRotation).
     /// </summary>
-    static void SaveOrbitalVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveOrbitalVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var velocity = ps.velocityOverLifetime;
-        if (!velocity.enabled) return;
+        if (!velocity.enabled) return true;
 
         float modifier = 20.0f;         // This is used to better simulate the 'velocity' in unity to 'posRotation' in SFX.
 
@@ -412,7 +426,7 @@ public class SFXExport : MonoBehaviour
                     break;
                 default:
                     Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the velocity module (Orbital velocity).");
-                    return;
+                    return false;
             }
 
             previousRot = new Vector3(x, y, z);
@@ -427,15 +441,17 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
     /// <summary>
     /// Convert the Unity velocity over lifetime module to SFX (positions).
     /// </summary>
-    static void SaveVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         var velocity = ps.velocityOverLifetime;
-        if (!velocity.enabled) return;
+        if (!velocity.enabled) return true;
 
         // This modifier is used to translate unity units to flyff units and have them make more sense
         float modifier = 0.5f;
@@ -463,7 +479,7 @@ public class SFXExport : MonoBehaviour
                     break;
                 default:
                     Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the velocity module (Linear velocity).");
-                    return;
+                    return false;
             }
 
             previousPos = new Vector3(x, y, z);
@@ -478,13 +494,17 @@ public class SFXExport : MonoBehaviour
             else
                 keyframes.Add(newKeyframe);
         }
+
+        return true;
     }
 
-    static void SaveTransformPosition(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveTransformPosition(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
     {
         Vector3 pos = ps.transform.position;
         foreach (sfxKeyframe kf in keyframes)
             kf.position += pos;
+
+        return true;
     }
 
     static void WriteKeyframes(BinaryWriter file, List<sfxKeyframe> keyframes)
