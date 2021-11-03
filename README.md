@@ -39,3 +39,5 @@ Copy the SFXExport.cs script into the Assets/Editor folder. That's it.
 - Click on Tools -> Export Selected Particle Prefab to .SFX.
   - The exporter will save the .SFX file in Assets/Exports, along with the textures that are used.
 - Enjoy the hour you just saved by using curves instead of keyframes!
+
+If you have specific questions, message me on discord (Frostiae#2809)
