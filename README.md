@@ -40,4 +40,5 @@ Copy the SFXExport.cs script into the Assets/Editor folder. That's it.
   - The exporter will save the .SFX file in Assets/Exports, along with the textures that are used.
 - Enjoy the hour you just saved by using curves instead of keyframes!
 
-If you have specific questions, message me on discord (Frostiae#2809)
+## Troubleshooting
+If something isn't working as expected, the first thing you should do is **check the logs**. Check your console and enable warnings too! If you do find a bug, feel free to create an issue or message me on discord (Frostiae#2809).
