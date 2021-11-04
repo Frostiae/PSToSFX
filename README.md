@@ -9,12 +9,16 @@
 </h3>
 
 ## About
-This is an export script made for the unity engine to convert unity particle systems to flyff-compatible SFX files. This script only works for converting Billboard-type SFX parts, since Flyff's particle's do not provide enough agency to warrant a conversion from unity's. If you have any ideas for particles, do let me know!
+This is an export script made for the unity engine to convert unity particle systems to flyff-compatible SFX files. This script now also works for converting particle-type SFX parts, as well as billboard-type. For particles, we simulate unity particles using regular Flyff billboards. (Don't go too hard with particles, performance ingame might be bad... maybe? Try it)
 
 <p align="center">
   <img src="https://i.imgur.com/NWkYG5R.gif" alt="sfx1" width="550px">
   <br>turns into<br>
   <img src="https://i.imgur.com/aOjZfQu.gif" alt="sfx2" width="550px">
+  <br>
+  <br>
+  Also, the particle potential (probably don't actually use this many particles)
+  <img src="https://cdn.discordapp.com/attachments/572664199440891914/905638578703441920/qpHtOsAQsI.gif" alt="sfx2" width="550px">
 </p>
 
 ### Module Support
@@ -42,7 +46,6 @@ Copy the SFXExport.cs script into the Assets/Editor folder. That's it.
 - Enjoy the hour you just saved by using curves instead of keyframes!
 
 #### General Don'ts
-- Don't use the rate properties in the emission module, use one burst instead, and set the burst count to 1.
 - Don't use any of the modules that are not supported (duh), as they won't allow you to export.
 - Don't use modes that are not either constant or curve, for the modules that support those decisions.
 - Don't forget to check the console, it's very helpful.
