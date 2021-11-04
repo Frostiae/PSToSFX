@@ -45,20 +45,29 @@ public class SFXExport : MonoBehaviour
         file.Write(version.ToCharArray());
 
         int numParts = prefab.transform.childCount;
+
+        // Check for extra billboards on the root gameobject
+        ParticleSystem ps = prefab.GetComponent<ParticleSystem>();
+        var emission = ps.emission;
+        if (emission.enabled && emission.rateOverTime.constant > 0)
+            numParts += (int)(emission.rateOverTime.constant * ps.main.duration) - 1;
+
+        // We need to check each child before writing numParts, since we are doing particles using
+        // separate billboard parts instead.
+        foreach (Transform child in prefab.transform)
+        {
+            ps = child.GetComponent<ParticleSystem>();
+            emission = ps.emission;
+            if (emission.enabled && emission.rateOverTime.constant > 0)
+                numParts += (int)(emission.rateOverTime.constant * ps.main.duration);
+        }
+
         file.Write(numParts + 1);                       // # of parts
 
-        // TODO: Currently only supporting bill (1)
-        file.Write(1);                                  // Type (Bill/Particle)
-        if (!SaveBill(prefab, file))
-            return false;
-
+        if (!SaveBill(prefab, file)) return false;
         // Save all the children as well
-        for (int i = 0; i < numParts; i++)
-        {
-            file.Write(1);
-            if (!SaveBill(prefab.transform.GetChild(i).gameObject, file))
-                return false;
-        }
+        for (int i = 0; i < prefab.transform.childCount; i++)
+            if (!SaveBill(prefab.transform.GetChild(i).gameObject, file)) return false;
 
         return true;
     }
@@ -68,32 +77,51 @@ public class SFXExport : MonoBehaviour
     /// </summary>
     static bool SaveBill(GameObject part, BinaryWriter file)
     {
-        List<sfxKeyframe> keyframes = new List<sfxKeyframe>();
-
-        file.Write(part.name.Length);                   // Name length
-        file.Write(part.name.ToCharArray());            // Name
-
         ParticleSystem ps = part.GetComponent<ParticleSystem>();
         ParticleSystemRenderer renderer = part.GetComponent<ParticleSystemRenderer>();
         var emission = ps.emission;
 
-        if (ps.main.startSpeed.constant > 0)
+        if (ps.main.duration != ps.main.startLifetime.constant)
         {
-            Debug.LogError("Start speed in the main module is not supported. Set it to 0 and Use Velocity over lifetime instead.");
+            Debug.LogError("The main module duration and start lifetime property must be equal: " + part.name);
             return false;
         }
 
-        if (emission.rateOverTime.constant > 0 || 
-            emission.rateOverDistance.constant > 0 ||
-            emission.burstCount < 1)
+        if (ps.main.startSpeed.constant > 0)
         {
-            Debug.LogError("Only bursts are supported in the emission module. Set the burst count to 1 and do not use rate over time or distance.");
+            Debug.LogError("Start speed in the main module is not supported. Set it to 0 and Use Velocity over lifetime instead: " + part.name);
             return false;
         }
 
         if (!CheckModules(ps))
-            Debug.LogWarning("There are some active modules that are not supported, and will not be included in the .SFX file. Supported modules" +
-                "are: Emission, Velocity over lifetime, Rotation over lifetime, Color over lifetime, Size over lifetime, Noise.");
+            Debug.LogWarning("There are some active modules that are not supported, and will not be included in the .SFX file. Please check" +
+                " the supported modules on the GitHub README.");
+
+        int numParticles = 0;
+        if (emission.rateOverTime.constant > 0)
+            numParticles = (int)(emission.rateOverTime.constant * ps.main.duration);
+
+        SaveUnityModules(ps, file, part, 0);
+        if (numParticles > 0)
+        {
+            for (int i = 1; i <= numParticles; i++)
+            {
+                SaveUnityModules(ps, file, part, i);
+            }
+        }
+
+        return true;
+    }
+
+    static bool SaveUnityModules(ParticleSystem ps, BinaryWriter file, GameObject part, int iteration)
+    {
+        ParticleSystemRenderer renderer = part.GetComponent<ParticleSystemRenderer>();
+        var emission = ps.emission;
+        List<sfxKeyframe> keyframes = new List<sfxKeyframe>();
+
+        file.Write(1);                                  // Bill type
+        file.Write(part.name.Length);                   // Name length
+        file.Write(part.name.ToCharArray());            // Name
 
         Material mat = renderer.sharedMaterial;
         Texture texture = mat.mainTexture;
@@ -113,7 +141,6 @@ public class SFXExport : MonoBehaviour
 
         file.Write(texOut.Length);                      // Texture name legnth
         file.Write(texOut.ToCharArray());               // Texture name
-
 
         // Copying texture file to exports directory
         // Only supporting .dds for now
@@ -158,23 +185,23 @@ public class SFXExport : MonoBehaviour
         }
 
         // INDIVIDUAL MODULES
-        if (!SaveSizes(ps, file, keyframes)) return false;
-        if (!SaveRotations(ps, file, keyframes)) return false;
-        if (!SaveNoise(ps, file, keyframes)) return false;
-        if (!SaveVelocity(ps, file, keyframes)) return false;
+        if (!SaveSizes(ps, file, keyframes, iteration)) return false;
+        if (!SaveRotations(ps, file, keyframes, iteration)) return false;
+        if (!SaveNoise(ps, file, keyframes, iteration)) return false;
+        if (!SaveVelocity(ps, file, keyframes, iteration)) return false;
         if (!SaveTransformPosition(ps, file, keyframes)) return false;
-        if (!SaveOrbitalVelocity(ps, file, keyframes)) return false;
+        if (!SaveOrbitalVelocity(ps, file, keyframes, iteration)) return false;
 
         // Colors need to be done at the end because the alpha needs to be applied to whatever keyframes exist by now
-        if (!SaveColors(ps, file, keyframes)) return false;
-        
+        if (!SaveColors(ps, file, keyframes, iteration)) return false;
+
         int numKeys = emission.enabled ? keyframes.Count() : 0;
         file.Write(numKeys);                            // # of keyframes
 
         WriteKeyframes(file, keyframes);
+
         return true;
     }
-
 
     /// <returns>True if the enabled modules are supported, false otherwise.</returns>
     static bool CheckModules(ParticleSystem ps)
@@ -202,7 +229,7 @@ public class SFXExport : MonoBehaviour
     /// Convert the Unity colors over lifetime modile to SFX. Only the alpha value is used, since flyff
     /// SFX does not support color editing.
     /// </summary>
-    static bool SaveColors(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveColors(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var colors = ps.colorOverLifetime;
         if (!colors.enabled) return true;
@@ -211,14 +238,15 @@ public class SFXExport : MonoBehaviour
         // the alpha to still be applied to all the existing keyframes in between.
         foreach (sfxKeyframe kf in keyframes)
         {
-            float alpha = colors.color.gradient.Evaluate(FrameToTime(kf.frame, ps.main.duration)).a;
+            int frameOffset = (int)(iteration * (60 / ps.emission.rateOverTime.constant));
+            float alpha = colors.color.gradient.Evaluate(FrameToTime(kf.frame - frameOffset, ps.main.duration)).a;
             int value = (int)(alpha * 255);
             kf.alpha = value;
         }
 
         foreach (GradientAlphaKey key in colors.color.gradient.alphaKeys)
         {
-            int frame = TimeToFrame(key.time * ps.main.duration);
+            int frame = TimeToFrame(key.time * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
 
             sfxKeyframe newKeyframe = new sfxKeyframe(frame);
             sfxKeyframe nearestKf = GetNearestKeyframe(frame, keyframes);
@@ -240,7 +268,7 @@ public class SFXExport : MonoBehaviour
     /// <summary>
     /// Convert the Unity size over lifetime module to SFX (scale).
     /// </summary>
-    static bool SaveSizes(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveSizes(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var sizes = ps.sizeOverLifetime;
 
@@ -249,7 +277,7 @@ public class SFXExport : MonoBehaviour
         {
             for (int i = 0; i <= curveSubdivisions; i++)
             {
-                int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+                int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
                 sfxKeyframe newKeyframe = new sfxKeyframe(frame);
                 newKeyframe.scale.x = newKeyframe.scale.y = newKeyframe.scale.z = ps.main.startSize.constant;
 
@@ -264,21 +292,21 @@ public class SFXExport : MonoBehaviour
 
         for (int i = 0; i <= curveSubdivisions; i++)
         {
-            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration)  + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
             sfxKeyframe newKeyframe = new sfxKeyframe(frame);
 
             if (sizes.separateAxes)
             {
-                float x = sizes.x.curve.Evaluate((float)(i / curveSubdivisions));
-                float y = sizes.y.curve.Evaluate((float)(i / curveSubdivisions));
-                float z = sizes.z.curve.Evaluate((float)(i / curveSubdivisions));
+                float x = sizes.x.curve.Evaluate((float)(i / curveSubdivisions)) * sizes.x.curveMultiplier;
+                float y = sizes.y.curve.Evaluate((float)(i / curveSubdivisions)) * sizes.y.curveMultiplier;
+                float z = sizes.z.curve.Evaluate((float)(i / curveSubdivisions)) * sizes.z.curveMultiplier;
                 newKeyframe.scale.x = x;
                 newKeyframe.scale.y = y;
                 newKeyframe.scale.z = z;
             }
             else
             {
-                float value = sizes.size.curve.Evaluate((float)(i / curveSubdivisions));
+                float value = sizes.size.curve.Evaluate((float)(i / curveSubdivisions)) * sizes.size.curveMultiplier;
                 newKeyframe.scale.x = value;
                 newKeyframe.scale.y = value;
                 newKeyframe.scale.z = value;
@@ -297,14 +325,14 @@ public class SFXExport : MonoBehaviour
     /// <summary>
     /// Convert the Unity rotations over lifetime module to SFX (rotations).
     /// </summary>
-    static bool SaveRotations(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveRotations(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var rotations = ps.rotationOverLifetime;
         if (!rotations.enabled) return true;
 
         for (int i = 0; i <= curveSubdivisions; i++)
         {
-            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
             sfxKeyframe newKeyframe = new sfxKeyframe(frame);
 
             float x, y, z;
@@ -340,7 +368,7 @@ public class SFXExport : MonoBehaviour
                     z = rotations.z.Evaluate((float)(i / curveSubdivisions)) * Mathf.Rad2Deg;
                 else
                 {
-                    Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the rotation over lifetime module (Angular velocity).");
+                    Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the rotation over lifetime module (Angular velocity): " + ps.name);
                     return false;
                 }
             }
@@ -362,7 +390,7 @@ public class SFXExport : MonoBehaviour
     /// <summary>
     /// Simulate the same effect the noise module gives through individual keyframe positions.
     /// </summary>
-    static bool SaveNoise(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveNoise(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var noise = ps.noise;
         if (!noise.enabled) return true;
@@ -372,7 +400,7 @@ public class SFXExport : MonoBehaviour
         
         for (int i = 0; i <= curveSubdivisions; i++)
         {
-            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
             float samplePoint = i / (curveSubdivisions) * noise.frequency;
 
             float x = Mathf.PerlinNoise(samplePoint, 0) * noise.strengthMultiplier;
@@ -397,7 +425,7 @@ public class SFXExport : MonoBehaviour
     /// <summary>
     /// Convert the Unity velocity over lifetime orbital velocity properties to SFX (posRotation).
     /// </summary>
-    static bool SaveOrbitalVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveOrbitalVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var velocity = ps.velocityOverLifetime;
         if (!velocity.enabled) return true;
@@ -407,7 +435,7 @@ public class SFXExport : MonoBehaviour
         Vector3 previousRot = new Vector3(0f, 0f, 0f);
         for (int i = 0; i <= curveSubdivisions; i++)
         {
-            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
             sfxKeyframe newKeyframe = new sfxKeyframe(frame);
 
             float x, y, z;
@@ -448,7 +476,7 @@ public class SFXExport : MonoBehaviour
     /// <summary>
     /// Convert the Unity velocity over lifetime module to SFX (positions).
     /// </summary>
-    static bool SaveVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes)
+    static bool SaveVelocity(ParticleSystem ps, BinaryWriter file, List<sfxKeyframe> keyframes, int iteration)
     {
         var velocity = ps.velocityOverLifetime;
         if (!velocity.enabled) return true;
@@ -459,7 +487,7 @@ public class SFXExport : MonoBehaviour
         Vector3 previousPos = new Vector3(0f, 0f, 0f);
         for (int i = 0; i <= curveSubdivisions; i++)
         {
-            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration);
+            int frame = TimeToFrame((float)(i / curveSubdivisions) * ps.main.duration) + (int)(iteration * (60 / ps.emission.rateOverTime.constant));
             sfxKeyframe newKeyframe = new sfxKeyframe(frame);
 
             float x, y, z;
@@ -468,14 +496,14 @@ public class SFXExport : MonoBehaviour
             switch (velocity.x.mode)
             {
                 case ParticleSystemCurveMode.Curve:
-                    x = (velocity.x.curve.Evaluate((float)(i / curveSubdivisions)) + previousPos.x) * modifier;
-                    y = (velocity.y.curve.Evaluate((float)(i / curveSubdivisions)) + previousPos.y) * modifier;
-                    z = (velocity.z.curve.Evaluate((float)(i / curveSubdivisions)) + previousPos.z) * modifier;
+                    x = ((velocity.x.curve.Evaluate((float)(i / curveSubdivisions)) * modifier) + previousPos.x);
+                    y = ((velocity.y.curve.Evaluate((float)(i / curveSubdivisions)) * modifier) + previousPos.y);
+                    z = ((velocity.z.curve.Evaluate((float)(i / curveSubdivisions)) * modifier) + previousPos.z);
                     break;
                 case ParticleSystemCurveMode.Constant:
-                    x = (velocity.x.constant + previousPos.x) * modifier;
-                    y = (velocity.y.constant + previousPos.y) * modifier;
-                    z = (velocity.z.constant + previousPos.z) * modifier;
+                    x = ((velocity.x.constant * modifier / 6) + previousPos.x);
+                    y = ((velocity.y.constant * modifier / 6) + previousPos.y);
+                    z = ((velocity.z.constant * modifier / 6) + previousPos.z);
                     break;
                 default:
                     Debug.LogError("The SFX exporter only supports the 'curve' and 'constant' modes in the velocity module (Linear velocity).");
